@@ -27,7 +27,7 @@ var runbookName = 'StaleUser-Monitor'
 var scheduleName = 'StaleUser-Daily'
 var graphAppId = '00000003-0000-0000-c000-000000000000'
 var phase1Roles = [ 'User.Read.All', 'AuditLog.Read.All', 'GroupMember.Read.All' ]
-var ownersRelationship = empty(groupOwnerObjectIds) ? null : { relationships: groupOwnerObjectIds }
+var ownersRelationship = { relationships: groupOwnerObjectIds }
 
 resource aa 'Microsoft.Automation/automationAccounts@2024-10-23' existing = {
   name: automationAccountName
@@ -41,7 +41,7 @@ resource exclusions 'Microsoft.Graph/groups@v1.0' = {
   mailNickname: '${groupNamePrefix}Exclusions'
   securityEnabled: true
   owners: ownersRelationship
-  members: empty(exclusionMemberObjectIds) ? null : { relationships: exclusionMemberObjectIds }
+  members: { relationships: exclusionMemberObjectIds }
 }
 
 resource manualReview 'Microsoft.Graph/groups@v1.0' = {
