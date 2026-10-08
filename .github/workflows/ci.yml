@@ -26,11 +26,11 @@ jobs:
 
       - name: Bicep build and azuredeploy.json drift check
         run: |
-          az bicep install
+          az bicep install --version v0.48.1
           az bicep build --file infra/main.bicep --outfile /tmp/azuredeploy.json
           az bicep build --file infra/identity.bicep --stdout > /dev/null
-          jq -S 'del(.metadata._generator)' /tmp/azuredeploy.json > /tmp/built.json
-          jq -S 'del(.metadata._generator)' azuredeploy.json > /tmp/committed.json
+          jq -S 'del(.metadata._generator) | walk(if type == "string" then gsub("\r"; "") else . end)' /tmp/azuredeploy.json > /tmp/built.json
+          jq -S 'del(.metadata._generator) | walk(if type == "string" then gsub("\r"; "") else . end)' azuredeploy.json > /tmp/committed.json
           if ! diff -q /tmp/built.json /tmp/committed.json; then
             echo "::error::azuredeploy.json is out of date. Run: az bicep build --file infra/main.bicep --outfile azuredeploy.json"
             exit 1
