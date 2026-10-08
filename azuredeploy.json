@@ -1,0 +1,638 @@
+{
+  "$schema": "https://schema.management.azure.com/schemas/2019-04-01/deploymentTemplate.json#",
+  "contentVersion": "1.0.0.0",
+  "metadata": {
+    "_generator": {
+      "name": "bicep",
+      "version": "0.40.2.10011",
+      "templateHash": "17092239825300599113"
+    },
+    "description": "Microsoft Entra stale user tracking - Phase 1 monitor and report. Deploys the Azure resources; run infra/identity.bicep afterwards to create the Entra groups and grant read-only Graph permissions."
+  },
+  "parameters": {
+    "location": {
+      "type": "string",
+      "defaultValue": "[resourceGroup().location]",
+      "metadata": {
+        "description": "Azure region for all resources."
+      }
+    },
+    "namePrefix": {
+      "type": "string",
+      "defaultValue": "stale-user",
+      "minLength": 3,
+      "maxLength": 16,
+      "metadata": {
+        "description": "Short prefix used in resource names."
+      }
+    },
+    "retentionInDays": {
+      "type": "int",
+      "defaultValue": 90,
+      "minValue": 30,
+      "maxValue": 730,
+      "metadata": {
+        "description": "Log Analytics retention in days for the evidence table."
+      }
+    },
+    "scheduleTimeOfDay": {
+      "type": "string",
+      "defaultValue": "06:00",
+      "metadata": {
+        "description": "Time of day (HH:mm) for the daily report-only run."
+      }
+    },
+    "scheduleTimeZone": {
+      "type": "string",
+      "defaultValue": "Eastern Standard Time",
+      "metadata": {
+        "description": "Time zone for the daily schedule (Windows time zone ID)."
+      }
+    },
+    "alertEmail": {
+      "type": "string",
+      "defaultValue": "",
+      "metadata": {
+        "description": "Optional email address for alert notifications. Leave empty to create alert rules without an action group."
+      }
+    },
+    "deployWorkbook": {
+      "type": "bool",
+      "defaultValue": true,
+      "metadata": {
+        "description": "Deploy the Azure Monitor workbook."
+      }
+    },
+    "deployAlerts": {
+      "type": "bool",
+      "defaultValue": true,
+      "metadata": {
+        "description": "Deploy alert rules (missing daily run, run failure, control defect, Automation job failure)."
+      }
+    },
+    "runbookContentUri": {
+      "type": "string",
+      "defaultValue": "https://raw.githubusercontent.com/S-Rimmer/entra-stale-user-tracking/main/src/StaleUser-Monitor.ps1",
+      "metadata": {
+        "description": "Raw URL of the runbook script. Change only when hosting a fork."
+      }
+    },
+    "deploymentDate": {
+      "type": "string",
+      "defaultValue": "[utcNow('yyyy-MM-dd')]",
+      "metadata": {
+        "description": "Do not change. Used to schedule the first run for the day after deployment."
+      }
+    },
+    "tags": {
+      "type": "object",
+      "defaultValue": {
+        "solution": "entra-stale-user-tracking"
+      }
+    }
+  },
+  "variables": {
+    "$fxv#0": "{\r\n  \"version\": \"Notebook/1.0\",\r\n  \"items\": [\r\n    {\r\n      \"type\": 1,\r\n      \"name\": \"header\",\r\n      \"content\": {\r\n        \"json\": \"## Microsoft Entra Stale User Tracking\\nPhase 1 monitor-and-report evidence from `EntraStaleUser_CL`. Threshold: no successful sign-in (`signInActivity.lastSuccessfulSignInDateTime`) within the configured inactivity window. This workbook does not notify or disable accounts.\"\r\n      }\r\n    },\r\n    {\r\n      \"type\": 9,\r\n      \"name\": \"parameters\",\r\n      \"content\": {\r\n        \"version\": \"KqlParameterItem/1.0\",\r\n        \"style\": \"pills\",\r\n        \"queryType\": 0,\r\n        \"resourceType\": \"microsoft.operationalinsights/workspaces\",\r\n        \"parameters\": [\r\n          {\r\n            \"id\": \"6a3b7f0e-1d52-4b8f-9a61-3c2f6e1d0a01\",\r\n            \"version\": \"KqlParameterItem/1.0\",\r\n            \"name\": \"TimeRange\",\r\n            \"type\": 4,\r\n            \"isRequired\": true,\r\n            \"value\": {\r\n              \"durationMs\": 604800000\r\n            },\r\n            \"typeSettings\": {\r\n              \"selectableValues\": [\r\n                {\r\n                  \"durationMs\": 86400000\r\n                },\r\n                {\r\n                  \"durationMs\": 604800000\r\n                },\r\n                {\r\n                  \"durationMs\": 2592000000\r\n                },\r\n                {\r\n                  \"durationMs\": 7776000000\r\n                }\r\n              ]\r\n            }\r\n          },\r\n          {\r\n            \"id\": \"6a3b7f0e-1d52-4b8f-9a61-3c2f6e1d0a02\",\r\n            \"version\": \"KqlParameterItem/1.0\",\r\n            \"name\": \"Engine\",\r\n            \"type\": 2,\r\n            \"isRequired\": true,\r\n            \"value\": \"All\",\r\n            \"jsonData\": \"[\\\"All\\\",\\\"AzureAutomation\\\",\\\"LogicApps\\\",\\\"LocalAzureCli\\\"]\",\r\n            \"typeSettings\": {\r\n              \"showDefault\": false\r\n            }\r\n          },\r\n          {\r\n            \"id\": \"6a3b7f0e-1d52-4b8f-9a61-3c2f6e1d0a03\",\r\n            \"version\": \"KqlParameterItem/1.0\",\r\n            \"name\": \"Mode\",\r\n            \"type\": 2,\r\n            \"isRequired\": true,\r\n            \"value\": \"All\",\r\n            \"jsonData\": \"[\\\"All\\\",\\\"ReportOnly\\\",\\\"NotificationPilot\\\",\\\"DisablePilot\\\",\\\"Production\\\"]\",\r\n            \"typeSettings\": {\r\n              \"showDefault\": false\r\n            }\r\n          }\r\n        ]\r\n      }\r\n    },\r\n    {\r\n      \"type\": 3,\r\n      \"name\": \"panel1\",\r\n      \"content\": {\r\n        \"version\": \"KqlItem/1.0\",\r\n        \"query\": \"let Latest = EntraStaleUser_CL\\r\\n| where TimeGenerated {TimeRange}\\r\\n| where RecordType == 'Evaluation'\\r\\n| where '{Engine}' == 'All' or Engine == '{Engine}'\\r\\n| where '{Mode}' == 'All' or Mode == '{Mode}'\\r\\n| summarize arg_max(TimeGenerated, *) by UserId;union\\r\\n  (Latest | summarize Value=count() | extend Metric='Evaluated users', Order=1),\\r\\n  (Latest | where Disposition in ('CandidateReportOnly','PendingSafetyBuffer','DisableCandidate') | summarize Value=count() | extend Metric='Inactive 30+ days', Order=2),\\r\\n  (Latest | where Disposition in ('NotifyUser','NotifyUserAndManager','ReviewTicket') | summarize Value=count() | extend Metric='Approaching (15-29 days)', Order=3),\\r\\n  (Latest | where Disposition == 'ManualReview' | summarize Value=count() | extend Metric='Manual review', Order=4),\\r\\n  (Latest | where Excluded == true | summarize Value=count() | extend Metric='Approved exclusions', Order=5),\\r\\n  (Latest | where ActionStatus in ('Failed','Blocked','PartialSuccess') or Disposition in ('Failed','BlockedRemediation') | summarize Value=count() | extend Metric='Failures or blocked', Order=6)\\r\\n| order by Order asc | project Metric, Value\",\r\n        \"size\": 4,\r\n        \"title\": \"Current status\",\r\n        \"queryType\": 0,\r\n        \"resourceType\": \"microsoft.operationalinsights/workspaces\",\r\n        \"crossComponentResources\": [\r\n          \"__WORKSPACE_ID__\"\r\n        ],\r\n        \"visualization\": \"tiles\",\r\n        \"tileSettings\": {\r\n          \"leftContent\": {\r\n            \"formatter\": 12,\r\n            \"columnMatch\": \"Value\"\r\n          },\r\n          \"showBorder\": true,\r\n          \"titleContent\": {\r\n            \"columnMatch\": \"Metric\"\r\n          }\r\n        }\r\n      }\r\n    },\r\n    {\r\n      \"type\": 3,\r\n      \"name\": \"panel2\",\r\n      \"content\": {\r\n        \"version\": \"KqlItem/1.0\",\r\n        \"query\": \"let Latest = EntraStaleUser_CL\\r\\n| where TimeGenerated {TimeRange}\\r\\n| where RecordType == 'Evaluation'\\r\\n| where '{Engine}' == 'All' or Engine == '{Engine}'\\r\\n| where '{Mode}' == 'All' or Mode == '{Mode}'\\r\\n| summarize arg_max(TimeGenerated, *) by UserId;Latest\\r\\n| where Disposition in ('CandidateReportOnly','PendingSafetyBuffer','DisableCandidate')\\r\\n| project UserPrincipalName, DisplayName, EmployeeType, LastSuccessfulSignInDateTime, DaysInactive, Disposition, Reason, PilotMember\\r\\n| order by DaysInactive desc\",\r\n        \"size\": 0,\r\n        \"title\": \"Inactive 30+ days (threshold reached)\",\r\n        \"queryType\": 0,\r\n        \"resourceType\": \"microsoft.operationalinsights/workspaces\",\r\n        \"crossComponentResources\": [\r\n          \"__WORKSPACE_ID__\"\r\n        ],\r\n        \"visualization\": \"table\"\r\n      }\r\n    },\r\n    {\r\n      \"type\": 3,\r\n      \"name\": \"panel3\",\r\n      \"content\": {\r\n        \"version\": \"KqlItem/1.0\",\r\n        \"query\": \"let Latest = EntraStaleUser_CL\\r\\n| where TimeGenerated {TimeRange}\\r\\n| where RecordType == 'Evaluation'\\r\\n| where '{Engine}' == 'All' or Engine == '{Engine}'\\r\\n| where '{Mode}' == 'All' or Mode == '{Mode}'\\r\\n| summarize arg_max(TimeGenerated, *) by UserId;Latest\\r\\n| extend Band = case(isnull(DaysInactive) or DaysInactive < 0, 'Unknown', DaysInactive < 15, '0-14', DaysInactive < 20, '15-19',\\r\\n                     DaysInactive < 25, '20-24', DaysInactive < 30, '25-29', '30+')\\r\\n| summarize Users=count() by Band\\r\\n| extend SortOrder=case(Band=='0-14',1,Band=='15-19',2,Band=='20-24',3,Band=='25-29',4,Band=='30+',5,6)\\r\\n| order by SortOrder asc | project Band, Users\",\r\n        \"size\": 0,\r\n        \"title\": \"Inactivity bands\",\r\n        \"queryType\": 0,\r\n        \"resourceType\": \"microsoft.operationalinsights/workspaces\",\r\n        \"crossComponentResources\": [\r\n          \"__WORKSPACE_ID__\"\r\n        ],\r\n        \"visualization\": \"barchart\"\r\n      }\r\n    },\r\n    {\r\n      \"type\": 3,\r\n      \"name\": \"panel4\",\r\n      \"content\": {\r\n        \"version\": \"KqlItem/1.0\",\r\n        \"query\": \"let Latest = EntraStaleUser_CL\\r\\n| where TimeGenerated {TimeRange}\\r\\n| where RecordType == 'Evaluation'\\r\\n| where '{Engine}' == 'All' or Engine == '{Engine}'\\r\\n| where '{Mode}' == 'All' or Mode == '{Mode}'\\r\\n| summarize arg_max(TimeGenerated, *) by UserId;Latest | summarize Users=count() by Disposition | order by Users desc\",\r\n        \"size\": 0,\r\n        \"title\": \"Disposition summary\",\r\n        \"queryType\": 0,\r\n        \"resourceType\": \"microsoft.operationalinsights/workspaces\",\r\n        \"crossComponentResources\": [\r\n          \"__WORKSPACE_ID__\"\r\n        ],\r\n        \"visualization\": \"piechart\"\r\n      }\r\n    },\r\n    {\r\n      \"type\": 3,\r\n      \"name\": \"panel5\",\r\n      \"content\": {\r\n        \"version\": \"KqlItem/1.0\",\r\n        \"query\": \"EntraStaleUser_CL\\r\\n| where TimeGenerated {TimeRange}\\r\\n| where '{Engine}' == 'All' or Engine == '{Engine}'\\r\\n| where '{Mode}' == 'All' or Mode == '{Mode}'| where RecordType == 'Evaluation'\\r\\n| summarize Inactive30Plus=dcountif(UserId, Disposition in ('CandidateReportOnly','PendingSafetyBuffer','DisableCandidate')),\\r\\n            Approaching=dcountif(UserId, Disposition in ('NotifyUser','NotifyUserAndManager','ReviewTicket')),\\r\\n            ManualReview=dcountif(UserId, ManualReview == true), Exclusions=dcountif(UserId, Excluded == true)\\r\\n  by bin(TimeGenerated, 1d)\",\r\n        \"size\": 0,\r\n        \"title\": \"Daily trend\",\r\n        \"queryType\": 0,\r\n        \"resourceType\": \"microsoft.operationalinsights/workspaces\",\r\n        \"crossComponentResources\": [\r\n          \"__WORKSPACE_ID__\"\r\n        ],\r\n        \"visualization\": \"timechart\"\r\n      }\r\n    },\r\n    {\r\n      \"type\": 3,\r\n      \"name\": \"panel6\",\r\n      \"content\": {\r\n        \"version\": \"KqlItem/1.0\",\r\n        \"query\": \"let Latest = EntraStaleUser_CL\\r\\n| where TimeGenerated {TimeRange}\\r\\n| where RecordType == 'Evaluation'\\r\\n| where '{Engine}' == 'All' or Engine == '{Engine}'\\r\\n| where '{Mode}' == 'All' or Mode == '{Mode}'\\r\\n| summarize arg_max(TimeGenerated, *) by UserId;Latest | where Excluded == true or ManualReview == true\\r\\n| project UserPrincipalName, DisplayName, EmployeeType, DaysInactive, Excluded, ManualReview, Reason, Details, TimeGenerated\\r\\n| order by ManualReview desc, DaysInactive desc\",\r\n        \"size\": 0,\r\n        \"title\": \"Exceptions and manual review\",\r\n        \"queryType\": 0,\r\n        \"resourceType\": \"microsoft.operationalinsights/workspaces\",\r\n        \"crossComponentResources\": [\r\n          \"__WORKSPACE_ID__\"\r\n        ],\r\n        \"visualization\": \"table\"\r\n      }\r\n    },\r\n    {\r\n      \"type\": 3,\r\n      \"name\": \"panel7\",\r\n      \"content\": {\r\n        \"version\": \"KqlItem/1.0\",\r\n        \"query\": \"EntraStaleUser_CL\\r\\n| where TimeGenerated {TimeRange}\\r\\n| where '{Engine}' == 'All' or Engine == '{Engine}'\\r\\n| where '{Mode}' == 'All' or Mode == '{Mode}'| summarize Evaluated=dcountif(UserId, RecordType == 'Evaluation'),\\r\\n            RunStarted=countif(RecordType == 'RunStarted'), RunCompleted=countif(RecordType == 'RunCompleted'),\\r\\n            RunFailed=countif(RecordType == 'RunFailed'), Blocked=countif(RecordType == 'Blocked'),\\r\\n            FirstRecord=min(TimeGenerated), LastRecord=max(TimeGenerated), Error=take_anyif(ErrorDetails, RecordType == 'RunFailed')\\r\\n  by RunId, Engine, Mode\\r\\n| extend Complete = RunStarted == 1 and RunCompleted == 1 and RunFailed == 0\\r\\n| order by LastRecord desc\",\r\n        \"size\": 0,\r\n        \"title\": \"Run health\",\r\n        \"queryType\": 0,\r\n        \"resourceType\": \"microsoft.operationalinsights/workspaces\",\r\n        \"crossComponentResources\": [\r\n          \"__WORKSPACE_ID__\"\r\n        ],\r\n        \"visualization\": \"table\"\r\n      }\r\n    },\r\n    {\r\n      \"type\": 3,\r\n      \"name\": \"panel8\",\r\n      \"content\": {\r\n        \"version\": \"KqlItem/1.0\",\r\n        \"query\": \"let Latest = EntraStaleUser_CL\\r\\n| where TimeGenerated {TimeRange}\\r\\n| where RecordType == 'Evaluation'\\r\\n| where '{Engine}' == 'All' or Engine == '{Engine}'\\r\\n| where '{Mode}' == 'All' or Mode == '{Mode}'\\r\\n| summarize arg_max(TimeGenerated, *) by UserId;union\\r\\n  (Latest | where isempty(UserId) | summarize Value=count() | extend Check='Missing UserId'),\\r\\n  (Latest | where isempty(UserPrincipalName) | summarize Value=count() | extend Check='Missing UPN'),\\r\\n  (Latest | where isnull(LastSuccessfulSignInDateTime) and Disposition != 'Skipped' | summarize Value=count() | extend Check='Null successful sign-in (in scope)'),\\r\\n  (Latest | where DaysInactive < -1 | summarize Value=count() | extend Check='Invalid DaysInactive'),\\r\\n  (Latest | where Excluded == true and Disposition in ('DisableCandidate','CandidateReportOnly') | summarize Value=count() | extend Check='SAFETY: Excluded but candidate'),\\r\\n  (Latest | where ManualReview == true and Disposition in ('DisableCandidate','CandidateReportOnly') | summarize Value=count() | extend Check='SAFETY: Manual review but candidate')\\r\\n| project Check, Value\",\r\n        \"size\": 0,\r\n        \"title\": \"Data quality (non-zero safety rows must be investigated)\",\r\n        \"queryType\": 0,\r\n        \"resourceType\": \"microsoft.operationalinsights/workspaces\",\r\n        \"crossComponentResources\": [\r\n          \"__WORKSPACE_ID__\"\r\n        ],\r\n        \"visualization\": \"table\"\r\n      }\r\n    }\r\n  ],\r\n  \"fallbackResourceIds\": [\r\n    \"__WORKSPACE_ID__\"\r\n  ]\r\n}\r\n",
+    "tableName": "EntraStaleUser_CL",
+    "streamName": "[format('Custom-{0}', variables('tableName'))]",
+    "runbookName": "StaleUser-Monitor",
+    "scheduleName": "StaleUser-Daily",
+    "runtimeEnvironmentName": "PowerShell-74",
+    "workbookDisplayName": "Entra Stale User Tracking",
+    "monitoringMetricsPublisher": "3913510d-42f4-4e42-8a64-420c390055eb",
+    "scheduleStart": "[format('{0}T{1}:00', dateTimeAdd(parameters('deploymentDate'), 'P1D', 'yyyy-MM-dd'), parameters('scheduleTimeOfDay'))]",
+    "createActionGroup": "[and(parameters('deployAlerts'), not(empty(parameters('alertEmail'))))]",
+    "columns": [
+      {
+        "name": "TimeGenerated",
+        "type": "datetime"
+      },
+      {
+        "name": "RunId",
+        "type": "string"
+      },
+      {
+        "name": "Engine",
+        "type": "string"
+      },
+      {
+        "name": "Mode",
+        "type": "string"
+      },
+      {
+        "name": "RecordType",
+        "type": "string"
+      },
+      {
+        "name": "UserId",
+        "type": "string"
+      },
+      {
+        "name": "UserPrincipalName",
+        "type": "string"
+      },
+      {
+        "name": "DisplayName",
+        "type": "string"
+      },
+      {
+        "name": "UserType",
+        "type": "string"
+      },
+      {
+        "name": "AccountEnabled",
+        "type": "boolean"
+      },
+      {
+        "name": "EmployeeType",
+        "type": "string"
+      },
+      {
+        "name": "OnPremisesSyncEnabled",
+        "type": "boolean"
+      },
+      {
+        "name": "LastSuccessfulSignInDateTime",
+        "type": "datetime"
+      },
+      {
+        "name": "DaysInactive",
+        "type": "int"
+      },
+      {
+        "name": "Disposition",
+        "type": "string"
+      },
+      {
+        "name": "Reason",
+        "type": "string"
+      },
+      {
+        "name": "Excluded",
+        "type": "boolean"
+      },
+      {
+        "name": "ManualReview",
+        "type": "boolean"
+      },
+      {
+        "name": "PilotMember",
+        "type": "boolean"
+      },
+      {
+        "name": "Action",
+        "type": "string"
+      },
+      {
+        "name": "ActionStatus",
+        "type": "string"
+      },
+      {
+        "name": "TicketId",
+        "type": "string"
+      },
+      {
+        "name": "VerifiedAccountEnabled",
+        "type": "boolean"
+      },
+      {
+        "name": "PolicyCutoffUtc",
+        "type": "datetime"
+      },
+      {
+        "name": "ActionCutoffUtc",
+        "type": "datetime"
+      },
+      {
+        "name": "Details",
+        "type": "string"
+      },
+      {
+        "name": "ErrorDetails",
+        "type": "string"
+      }
+    ],
+    "actionGroupIds": "[if(variables('createActionGroup'), createArray(resourceId('Microsoft.Insights/actionGroups', format('ag-{0}', parameters('namePrefix')))), createArray())]",
+    "logAlerts": [
+      {
+        "name": "missing-daily-run",
+        "severity": 2,
+        "frequency": "PT6H",
+        "window": "P1D",
+        "description": "No RunCompleted evidence in the last 24 hours. Expected to fire until the first scheduled run completes.",
+        "query": "EntraStaleUser_CL | where RecordType == 'RunCompleted' | summarize Completed=count()",
+        "operator": "LessThan",
+        "threshold": 1,
+        "aggregation": "Total",
+        "measure": "Completed"
+      },
+      {
+        "name": "run-failed",
+        "severity": 1,
+        "frequency": "PT15M",
+        "window": "PT1H",
+        "description": "Fail-closed run failure or blocked action recorded.",
+        "query": "EntraStaleUser_CL | where RecordType in ('RunFailed','Blocked') or ActionStatus in ('Failed','PartialSuccess')",
+        "operator": "GreaterThan",
+        "threshold": 0,
+        "aggregation": "Count",
+        "measure": ""
+      },
+      {
+        "name": "control-defect",
+        "severity": 0,
+        "frequency": "PT1H",
+        "window": "P1D",
+        "description": "Excluded or manual-review account classified as threshold reached or disable candidate.",
+        "query": "EntraStaleUser_CL | where RecordType == 'Evaluation' | where Disposition in ('DisableCandidate','CandidateReportOnly') and (Excluded == true or ManualReview == true)",
+        "operator": "GreaterThan",
+        "threshold": 0,
+        "aggregation": "Count",
+        "measure": ""
+      }
+    ]
+  },
+  "resources": [
+    {
+      "type": "Microsoft.OperationalInsights/workspaces",
+      "apiVersion": "2023-09-01",
+      "name": "[format('law-{0}', parameters('namePrefix'))]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tags')]",
+      "properties": {
+        "sku": {
+          "name": "PerGB2018"
+        },
+        "retentionInDays": "[parameters('retentionInDays')]",
+        "features": {
+          "enableLogAccessUsingOnlyResourcePermissions": true
+        }
+      }
+    },
+    {
+      "type": "Microsoft.OperationalInsights/workspaces/tables",
+      "apiVersion": "2022-10-01",
+      "name": "[format('{0}/{1}', format('law-{0}', parameters('namePrefix')), variables('tableName'))]",
+      "properties": {
+        "plan": "Analytics",
+        "retentionInDays": "[parameters('retentionInDays')]",
+        "schema": {
+          "name": "[variables('tableName')]",
+          "columns": "[variables('columns')]"
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.OperationalInsights/workspaces', format('law-{0}', parameters('namePrefix')))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Insights/dataCollectionRules",
+      "apiVersion": "2023-03-11",
+      "name": "[format('dcr-{0}', parameters('namePrefix'))]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tags')]",
+      "kind": "Direct",
+      "properties": {
+        "streamDeclarations": {
+          "[format('{0}', variables('streamName'))]": {
+            "columns": "[variables('columns')]"
+          }
+        },
+        "destinations": {
+          "logAnalytics": [
+            {
+              "name": "law",
+              "workspaceResourceId": "[resourceId('Microsoft.OperationalInsights/workspaces', format('law-{0}', parameters('namePrefix')))]"
+            }
+          ]
+        },
+        "dataFlows": [
+          {
+            "streams": [
+              "[variables('streamName')]"
+            ],
+            "destinations": [
+              "law"
+            ],
+            "transformKql": "source",
+            "outputStream": "[variables('streamName')]"
+          }
+        ]
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.OperationalInsights/workspaces', format('law-{0}', parameters('namePrefix')))]",
+        "[resourceId('Microsoft.OperationalInsights/workspaces/tables', format('law-{0}', parameters('namePrefix')), variables('tableName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Automation/automationAccounts",
+      "apiVersion": "2024-10-23",
+      "name": "[format('aa-{0}', parameters('namePrefix'))]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tags')]",
+      "identity": {
+        "type": "SystemAssigned"
+      },
+      "properties": {
+        "sku": {
+          "name": "Basic"
+        },
+        "publicNetworkAccess": true,
+        "disableLocalAuth": true
+      }
+    },
+    {
+      "type": "Microsoft.Automation/automationAccounts/runtimeEnvironments",
+      "apiVersion": "2024-10-23",
+      "name": "[format('{0}/{1}', format('aa-{0}', parameters('namePrefix')), variables('runtimeEnvironmentName'))]",
+      "location": "[parameters('location')]",
+      "properties": {
+        "runtime": {
+          "language": "PowerShell",
+          "version": "7.4"
+        },
+        "defaultPackages": {}
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Automation/automationAccounts', format('aa-{0}', parameters('namePrefix')))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Automation/automationAccounts/runbooks",
+      "apiVersion": "2024-10-23",
+      "name": "[format('{0}/{1}', format('aa-{0}', parameters('namePrefix')), variables('runbookName'))]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tags')]",
+      "properties": {
+        "runbookType": "PowerShell",
+        "runtimeEnvironment": "[variables('runtimeEnvironmentName')]",
+        "description": "Entra stale user monitor. Phase 1 report-only by default.",
+        "logProgress": false,
+        "logVerbose": false,
+        "publishContentLink": {
+          "uri": "[parameters('runbookContentUri')]"
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Automation/automationAccounts', format('aa-{0}', parameters('namePrefix')))]",
+        "[resourceId('Microsoft.Automation/automationAccounts/runtimeEnvironments', format('aa-{0}', parameters('namePrefix')), variables('runtimeEnvironmentName'))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Automation/automationAccounts/variables",
+      "apiVersion": "2024-10-23",
+      "name": "[format('{0}/{1}', format('aa-{0}', parameters('namePrefix')), 'StaleUser-IngestionEndpoint')]",
+      "properties": {
+        "description": "DCR logs-ingestion endpoint for evidence.",
+        "isEncrypted": false,
+        "value": "[format('\"{0}\"', reference(resourceId('Microsoft.Insights/dataCollectionRules', format('dcr-{0}', parameters('namePrefix'))), '2023-03-11').endpoints.logsIngestion)]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Automation/automationAccounts', format('aa-{0}', parameters('namePrefix')))]",
+        "[resourceId('Microsoft.Insights/dataCollectionRules', format('dcr-{0}', parameters('namePrefix')))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Automation/automationAccounts/variables",
+      "apiVersion": "2024-10-23",
+      "name": "[format('{0}/{1}', format('aa-{0}', parameters('namePrefix')), 'StaleUser-DcrImmutableId')]",
+      "properties": {
+        "description": "DCR immutable ID for evidence.",
+        "isEncrypted": false,
+        "value": "[format('\"{0}\"', reference(resourceId('Microsoft.Insights/dataCollectionRules', format('dcr-{0}', parameters('namePrefix'))), '2023-03-11').immutableId)]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Automation/automationAccounts', format('aa-{0}', parameters('namePrefix')))]",
+        "[resourceId('Microsoft.Insights/dataCollectionRules', format('dcr-{0}', parameters('namePrefix')))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Automation/automationAccounts/schedules",
+      "apiVersion": "2024-10-23",
+      "name": "[format('{0}/{1}', format('aa-{0}', parameters('namePrefix')), variables('scheduleName'))]",
+      "properties": {
+        "startTime": "[variables('scheduleStart')]",
+        "frequency": "Day",
+        "interval": 1,
+        "timeZone": "[parameters('scheduleTimeZone')]",
+        "description": "Daily report-only evaluation. Linked to the runbook by infra/identity.bicep."
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Automation/automationAccounts', format('aa-{0}', parameters('namePrefix')))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Insights/diagnosticSettings",
+      "apiVersion": "2021-05-01-preview",
+      "scope": "[resourceId('Microsoft.Automation/automationAccounts', format('aa-{0}', parameters('namePrefix')))]",
+      "name": "to-law",
+      "properties": {
+        "workspaceId": "[resourceId('Microsoft.OperationalInsights/workspaces', format('law-{0}', parameters('namePrefix')))]",
+        "logs": [
+          {
+            "category": "JobLogs",
+            "enabled": true
+          },
+          {
+            "category": "JobStreams",
+            "enabled": true
+          }
+        ]
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Automation/automationAccounts', format('aa-{0}', parameters('namePrefix')))]",
+        "[resourceId('Microsoft.OperationalInsights/workspaces', format('law-{0}', parameters('namePrefix')))]"
+      ]
+    },
+    {
+      "type": "Microsoft.Authorization/roleAssignments",
+      "apiVersion": "2022-04-01",
+      "scope": "[resourceId('Microsoft.Insights/dataCollectionRules', format('dcr-{0}', parameters('namePrefix')))]",
+      "name": "[guid(resourceId('Microsoft.Insights/dataCollectionRules', format('dcr-{0}', parameters('namePrefix'))), resourceId('Microsoft.Automation/automationAccounts', format('aa-{0}', parameters('namePrefix'))), variables('monitoringMetricsPublisher'))]",
+      "properties": {
+        "roleDefinitionId": "[subscriptionResourceId('Microsoft.Authorization/roleDefinitions', variables('monitoringMetricsPublisher'))]",
+        "principalId": "[reference(resourceId('Microsoft.Automation/automationAccounts', format('aa-{0}', parameters('namePrefix'))), '2024-10-23', 'full').identity.principalId]",
+        "principalType": "ServicePrincipal"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Automation/automationAccounts', format('aa-{0}', parameters('namePrefix')))]",
+        "[resourceId('Microsoft.Insights/dataCollectionRules', format('dcr-{0}', parameters('namePrefix')))]"
+      ]
+    },
+    {
+      "condition": "[parameters('deployWorkbook')]",
+      "type": "Microsoft.Insights/workbooks",
+      "apiVersion": "2023-06-01",
+      "name": "[guid(resourceGroup().id, 'entra-stale-user-workbook')]",
+      "location": "[parameters('location')]",
+      "kind": "shared",
+      "tags": "[union(parameters('tags'), createObject('hidden-title', variables('workbookDisplayName')))]",
+      "properties": {
+        "displayName": "[variables('workbookDisplayName')]",
+        "category": "workbook",
+        "sourceId": "[resourceId('Microsoft.OperationalInsights/workspaces', format('law-{0}', parameters('namePrefix')))]",
+        "serializedData": "[replace(variables('$fxv#0'), '__WORKSPACE_ID__', resourceId('Microsoft.OperationalInsights/workspaces', format('law-{0}', parameters('namePrefix'))))]"
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.OperationalInsights/workspaces', format('law-{0}', parameters('namePrefix')))]"
+      ]
+    },
+    {
+      "condition": "[variables('createActionGroup')]",
+      "type": "Microsoft.Insights/actionGroups",
+      "apiVersion": "2023-01-01",
+      "name": "[format('ag-{0}', parameters('namePrefix'))]",
+      "location": "global",
+      "tags": "[parameters('tags')]",
+      "properties": {
+        "groupShortName": "StaleUser",
+        "enabled": true,
+        "emailReceivers": [
+          {
+            "name": "alert-email",
+            "emailAddress": "[parameters('alertEmail')]",
+            "useCommonAlertSchema": true
+          }
+        ]
+      }
+    },
+    {
+      "copy": {
+        "name": "queryAlerts",
+        "count": "[length(variables('logAlerts'))]"
+      },
+      "condition": "[parameters('deployAlerts')]",
+      "type": "Microsoft.Insights/scheduledQueryRules",
+      "apiVersion": "2023-12-01",
+      "name": "[format('{0}-{1}', parameters('namePrefix'), variables('logAlerts')[copyIndex()].name)]",
+      "location": "[parameters('location')]",
+      "tags": "[parameters('tags')]",
+      "properties": {
+        "displayName": "[format('{0}-{1}', parameters('namePrefix'), variables('logAlerts')[copyIndex()].name)]",
+        "description": "[variables('logAlerts')[copyIndex()].description]",
+        "severity": "[variables('logAlerts')[copyIndex()].severity]",
+        "enabled": true,
+        "scopes": [
+          "[resourceId('Microsoft.OperationalInsights/workspaces', format('law-{0}', parameters('namePrefix')))]"
+        ],
+        "evaluationFrequency": "[variables('logAlerts')[copyIndex()].frequency]",
+        "windowSize": "[variables('logAlerts')[copyIndex()].window]",
+        "autoMitigate": false,
+        "criteria": {
+          "allOf": [
+            "[union(createObject('query', variables('logAlerts')[copyIndex()].query, 'timeAggregation', variables('logAlerts')[copyIndex()].aggregation, 'operator', variables('logAlerts')[copyIndex()].operator, 'threshold', variables('logAlerts')[copyIndex()].threshold, 'failingPeriods', createObject('numberOfEvaluationPeriods', 1, 'minFailingPeriodsToAlert', 1)), if(empty(variables('logAlerts')[copyIndex()].measure), createObject(), createObject('metricMeasureColumn', variables('logAlerts')[copyIndex()].measure)))]"
+          ]
+        },
+        "actions": {
+          "actionGroups": "[variables('actionGroupIds')]"
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Insights/actionGroups', format('ag-{0}', parameters('namePrefix')))]",
+        "[resourceId('Microsoft.OperationalInsights/workspaces', format('law-{0}', parameters('namePrefix')))]",
+        "[resourceId('Microsoft.OperationalInsights/workspaces/tables', format('law-{0}', parameters('namePrefix')), variables('tableName'))]"
+      ]
+    },
+    {
+      "condition": "[parameters('deployAlerts')]",
+      "type": "Microsoft.Insights/metricAlerts",
+      "apiVersion": "2018-03-01",
+      "name": "[format('{0}-automation-job-failed', parameters('namePrefix'))]",
+      "location": "global",
+      "tags": "[parameters('tags')]",
+      "properties": {
+        "copy": [
+          {
+            "name": "actions",
+            "count": "[length(variables('actionGroupIds'))]",
+            "input": {
+              "actionGroupId": "[variables('actionGroupIds')[copyIndex('actions')]]"
+            }
+          }
+        ],
+        "description": "The stale user runbook job failed, was suspended, or was stopped.",
+        "severity": 1,
+        "enabled": true,
+        "scopes": [
+          "[resourceId('Microsoft.Automation/automationAccounts', format('aa-{0}', parameters('namePrefix')))]"
+        ],
+        "evaluationFrequency": "PT15M",
+        "windowSize": "PT1H",
+        "criteria": {
+          "odata.type": "Microsoft.Azure.Monitor.SingleResourceMultipleMetricCriteria",
+          "allOf": [
+            {
+              "criterionType": "StaticThresholdCriterion",
+              "name": "FailedJobs",
+              "metricName": "TotalJob",
+              "metricNamespace": "Microsoft.Automation/automationAccounts",
+              "operator": "GreaterThan",
+              "threshold": 0,
+              "timeAggregation": "Total",
+              "dimensions": [
+                {
+                  "name": "Runbook",
+                  "operator": "Include",
+                  "values": [
+                    "[variables('runbookName')]"
+                  ]
+                },
+                {
+                  "name": "Status",
+                  "operator": "Include",
+                  "values": [
+                    "Failed",
+                    "Suspended",
+                    "Stopped"
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "dependsOn": [
+        "[resourceId('Microsoft.Automation/automationAccounts', format('aa-{0}', parameters('namePrefix')))]",
+        "[resourceId('Microsoft.Insights/actionGroups', format('ag-{0}', parameters('namePrefix')))]"
+      ]
+    }
+  ],
+  "outputs": {
+    "automationAccountName": {
+      "type": "string",
+      "value": "[format('aa-{0}', parameters('namePrefix'))]"
+    },
+    "managedIdentityPrincipalId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Automation/automationAccounts', format('aa-{0}', parameters('namePrefix'))), '2024-10-23', 'full').identity.principalId]"
+    },
+    "workspaceName": {
+      "type": "string",
+      "value": "[format('law-{0}', parameters('namePrefix'))]"
+    },
+    "workspaceCustomerId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.OperationalInsights/workspaces', format('law-{0}', parameters('namePrefix'))), '2023-09-01').customerId]"
+    },
+    "ingestionEndpoint": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Insights/dataCollectionRules', format('dcr-{0}', parameters('namePrefix'))), '2023-03-11').endpoints.logsIngestion]"
+    },
+    "dcrImmutableId": {
+      "type": "string",
+      "value": "[reference(resourceId('Microsoft.Insights/dataCollectionRules', format('dcr-{0}', parameters('namePrefix'))), '2023-03-11').immutableId]"
+    },
+    "runbookName": {
+      "type": "string",
+      "value": "[variables('runbookName')]"
+    },
+    "scheduleName": {
+      "type": "string",
+      "value": "[variables('scheduleName')]"
+    },
+    "nextStep": {
+      "type": "string",
+      "value": "[format('az deployment group create -g {0} --template-file infra/identity.bicep -p automationAccountName={1}', resourceGroup().name, format('aa-{0}', parameters('namePrefix')))]"
+    }
+  }
+}

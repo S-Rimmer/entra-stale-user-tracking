@@ -1,0 +1,52 @@
+name: Deploy Azure resources (optional)
+
+# Deploys step 1 (Azure resources) with OpenID Connect. Step 2 (Entra groups and Graph
+# permissions) intentionally stays a one-time admin action; do not grant this pipeline
+# AppRoleAssignment.ReadWrite.All or Group.ReadWrite.All.
+#
+# Required repository secrets: AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID.
+# The federated identity needs Contributor and Role Based Access Control Administrator
+# (or User Access Administrator) on the target resource group.
+
+on:
+  workflow_dispatch:
+    inputs:
+      resourceGroup:
+        description: Target resource group
+        required: true
+        default: rg-stale-user-tracking
+      location:
+        description: Azure region
+        required: true
+        default: eastus
+      namePrefix:
+        description: Resource name prefix
+        required: true
+        default: stale-user
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy
+        run: |
+          az group create -n "${{ inputs.resourceGroup }}" -l "${{ inputs.location }}" -o none
+          az deployment group create \
+            -g "${{ inputs.resourceGroup }}" \
+            --template-file infra/main.bicep \
+            -p namePrefix="${{ inputs.namePrefix }}" \
+               runbookContentUri="https://raw.githubusercontent.com/${{ github.repository }}/${{ github.sha }}/src/StaleUser-Monitor.ps1" \
+            --query properties.outputs -o json

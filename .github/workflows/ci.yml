@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Pester unit tests (mocked Graph and ingestion)
+        shell: pwsh
+        run: |
+          Install-Module Pester -MinimumVersion 5.5.0 -Force -Scope CurrentUser
+          $c = New-PesterConfiguration
+          $c.Run.Path = './tests'
+          $c.Run.Exit = $true
+          $c.Output.Verbosity = 'Detailed'
+          Invoke-Pester -Configuration $c
+
+      - name: Bicep build and azuredeploy.json drift check
+        run: |
+          az bicep install
+          az bicep build --file infra/main.bicep --outfile /tmp/azuredeploy.json
+          az bicep build --file infra/identity.bicep --stdout > /dev/null
+          jq -S 'del(.metadata._generator)' /tmp/azuredeploy.json > /tmp/built.json
+          jq -S 'del(.metadata._generator)' azuredeploy.json > /tmp/committed.json
+          if ! diff -q /tmp/built.json /tmp/committed.json; then
+            echo "::error::azuredeploy.json is out of date. Run: az bicep build --file infra/main.bicep --outfile azuredeploy.json"
+            exit 1
+          fi
